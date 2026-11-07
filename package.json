@@ -1,0 +1,23 @@
+{
+  "name": "whatsapp-tablero-mvp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file=.env --import tsx src/index.ts",
+    "build": "tsc",
+    "start": "node --env-file=.env dist/index.js",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/qrcode-terminal": "^0.12.2",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.24",
+    "google-auth-library": "^11.2.0",
+    "googleapis": "^185.0.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

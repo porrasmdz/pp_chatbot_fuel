@@ -3,7 +3,7 @@ SE LEAKEO POR CLI
 
 # MVP: tablero y factura por WhatsApp
 
-Este bot usa Baileys, Node.js y TypeScript. Recibe dos fotos por WhatsApp en cualquier orden: tablero y factura de combustible. Si llega el tablero, lee el kilometraje y el combustible con OpenRouter, muestra en consola el kilometraje antes de su confianza y pide la factura cuando la confianza es **mayor que 80 %**. Si llega la factura primero, pide la foto del tablero. De la factura extrae galones, cantidad, valor de la recarga, tipo de combustible, precio por galón, fecha y hora. Con las dos fotos agrega una fila a Google Sheets y confirma por WhatsApp. Si una foto no se puede leer, pide otra.
+Este bot usa Baileys, Node.js y TypeScript. Recibe dos fotos por WhatsApp en cualquier orden: tablero y factura de combustible. La primera foto abre una sesión de **5 minutos**. El bot espera **5 segundos** antes de analizar y responder, para reunir las dos fotos si llegan juntas. Si solo llega una foto válida, confirma la sesión y pide la otra en un único mensaje. Cada foto requiere todos sus campos legibles y porcentajes de nitidez y confianza de al menos **30 %**. La nitidez de 30 a 79 % se registra en `FOTOS_SIN_NITIDEZ` sin notificarla por WhatsApp. Solo un porcentaje menor de 30 % o un campo faltante, incluido `COMBUSTIBLE`, aparece como error `🔴`. El bot muestra únicamente los encabezados de las fotos con errores y pide repetir la toma mostrando los campos faltantes. Con ambas fotos válidas agrega una fila a Google Sheets, envía una confirmación breve con `✅` y cierra la sesión. La validación del teléfono contra `PERSONAS` está desactivada por ahora.
 
 ## Preparación
 
@@ -18,11 +18,19 @@ Configura `OPENROUTER_API_KEY` y `OPENROUTER_MODEL`. El modelo debe aceptar imá
 
 ## Google Sheets
 
-Habilita Google Sheets API en Google Cloud, crea una cuenta de servicio, descarga sus credenciales JSON y comparte la hoja con el correo de esa cuenta como **Editor**. En la fila 1 de la pestaña usa exactamente estas nueve cabeceras, en este orden:
+Habilita Google Sheets API en Google Cloud, crea una cuenta de servicio, descarga sus credenciales JSON y comparte la hoja con el correo de esa cuenta como **Editor**. En la fila 1 de la pestaña usa exactamente estas 17 cabeceras, en este orden:
 
 ```text
-TELF | KILOMETRAJE | COMBUSTIBLE | FECHA | HORA | Precio por Galón | Galones | Tipo de Combustible | Valor de la Recarga
+TELF | KILOMETRAJE | COMBUSTIBLE | FECHA | HORA | Precio por Galón | Galones | Tipo de Combustible | Valor de la Recarga | PLACA | RUC ESTACIÓN | ESTACIÓN DE SERVICIO | NÚMERO DE FACTURA | FECHA FACTURA | HORA FACTURA | SUBTOTAL | IVA
 ```
+
+Crea otra pestaña llamada exactamente `FOTOS_SIN_NITIDEZ` con estas cabeceras en la fila 1, en este orden (incluida la escritura de `RECIIMIENTO`):
+
+```text
+NITIDEZ (PORCENTAJE) | FECHA (FECHA DE RECIIMIENTO) | HORA (DE RECIBIMIENTO) | TELF | TIPO
+```
+
+Cada foto con nitidez desde 30 % hasta menos de 80 % agrega una fila a esa pestaña. También se registra una factura si no se distingue su número, incluso con nitidez de 80 % o más. `FECHA` y `HORA` corresponden al momento en que el servicio recibió esa foto, en `America/Guayaquil`; `TELF` usa el mismo número o `@lid` que la matriz principal. `TIPO` vale `FACTURA` o `TABLERO` y, si falta un campo, indica el motivo, por ejemplo `FACTURA - NÚMERO DE FACTURA NO SE VE`.
 
 Configura en `.env`:
 
@@ -32,7 +40,7 @@ GOOGLE_SHEET_NAME=Lecturas
 GOOGLE_APPLICATION_CREDENTIALS=./google-service-account.json
 ```
 
-El archivo de credenciales y `.env` están excluidos de Git. `TELF` guarda el número si WhatsApp lo entrega; cuando llega un identificador `@lid`, guarda ese WhatsApp ID. `FECHA` y `HORA` se leen de la factura. Si no se distinguen, esas celdas quedan vacías. `Cantidad` se extrae y se muestra en consola, pero no se escribe en Sheets porque no hay una columna para ella. La foto de la factura se procesa para extraer datos; no se almacena en Drive ni en Sheets. La fila se agrega solo después de recibir las dos fotos. Si la configuración de Sheets está vacía, los datos conjuntos se imprimen como JSON en consola.
+El archivo de credenciales y `.env` están excluidos de Git. `TELF` lo define el servicio Node.js a partir del remitente: guarda el número cuando WhatsApp lo entrega y el WhatsApp ID `@lid` en caso contrario. `KILOMETRAJE` y `COMBUSTIBLE` salen de la foto del tablero. `FECHA` y `HORA` salen de la marca de tiempo del **segundo mensaje de foto válido de WhatsApp**, convertida a `America/Guayaquil`; no se extraen de la imagen. Las columnas restantes salen de la foto de la factura. `FECHA FACTURA` y `HORA FACTURA` se leen del comprobante y pueden diferir de `FECHA` y `HORA`. `Cantidad` también se extrae y valida, pero no se escribe en Sheets porque no hay una columna para ella. El prompt reconoce `Cantidad`, `CANT.`, `CTD`, `CND`, `CAN`, `CAM.` y `QTY`, y busca el valor a la izquierda del grupo `Cantidad / Valor / Total` cuando la etiqueta se ve borrosa. `NÚMERO DE FACTURA` es opcional: si no se distingue, queda vacío en la matriz principal y se anota el motivo en `FOTOS_SIN_NITIDEZ`. Los demás campos de la factura siguen siendo obligatorios. La foto se procesa para extraer datos; no se almacena en Drive ni en Sheets. La fila se agrega solo después de recibir las dos fotos válidas. Si Google Sheets no está configurado, el resultado se imprime como JSON en consola.
 
 ## Uso
 
@@ -40,7 +48,7 @@ El archivo de credenciales y `.env` están excluidos de Git. `TELF` guarda el n�
 npm run dev
 ```
 
-Escanea el QR en **WhatsApp > Dispositivos vinculados > Vincular dispositivo**. La sesión de WhatsApp se guarda en `auth_info_baileys/`. Desde otro número, en un chat privado, envía la foto del tablero o de la factura. El bot pedirá la foto que falta. Las dos fotos deben llegar en una ventana de **20 segundos contados desde la recepción de la primera**. Si falta una, responde que la sesión de captura se cerró y descarta la primera lectura. En ese caso puedes empezar otra vez con cualquiera de las dos fotos. El estado de espera se mantiene en memoria por chat; si reinicias el proceso entre ambas fotos, vuelve a enviar la primera foto.
+Escanea el QR en **WhatsApp > Dispositivos vinculados > Vincular dispositivo**. La sesión de WhatsApp se guarda en `auth_info_baileys/`. Desde otro número, en un chat privado, envía la foto del tablero o de la factura. Si envías ambas fotos dentro de los primeros 5 segundos, el bot omite los mensajes intermedios y responde una sola vez después de validarlas. Los 5 minutos de sesión se cuentan desde la recepción de la primera foto. Si no llegan ambas fotos válidas, responde que la sesión se cerró. Los mensajes de texto, stickers y otros contenidos reciben `CONTENIDO INVÁLIDO` solo durante una sesión activa; fuera de ella se ignoran. Más de 50 mensajes de un mismo chat en cualquier ventana de 1 minuto provocan un bloqueo de 8 horas. El estado del límite se guarda en `rate_limits.json` y el estado de la sesión de captura queda en memoria; al reiniciar el proceso se pierde una sesión de captura en curso.
 
 Para probar una foto del tablero directamente con OpenRouter, sin WhatsApp:
 

@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env
 auth_info_baileys/
+rate_limits.json
+rate_limits.json.tmp
 google-service-account.json
 keys/
 keys

@@ -1,29 +1,56 @@
 import type { DashboardReading } from "./analyze.js";
 
 export const pedirFactura =
-  "Ya leí el kilometraje. Envíame la foto clara de la factura de combustible. La sesión vence 20 segundos después de la primera foto.";
+  "Envía la foto de la factura.";
 
 export const pedirKilometraje =
-  "Ya leí la factura. Envíame una foto clara del tablero con el kilometraje. La sesión vence 20 segundos después de la primera foto.";
+  "Envía la foto del tablero.";
+
+export const primeraFotoRecibida =
+  "Primera foto recibida. Sesión activa por 5 minutos.";
 
 export const sesionExpirada =
-  "La sesión se cerró porque no recibí las dos fotos dentro de 20 segundos. Envía una foto del tablero o de la factura para comenzar de nuevo.";
+  "Sesión cerrada: faltó una foto válida dentro de 5 minutos.";
 
 export const sesionCompletada =
-  "Recibí las dos fotos y registré los datos. La sesión se cerró. Gracias.";
+  "✅ Registro guardado. Sesión cerrada.";
+
+export const sesionCompletadaEnConsola =
+  "✅ Fotos validadas. Datos en consola. Sesión cerrada.";
+
+export function mensajeRegistroExitoso(row: Array<string | number>, savedInSheets: boolean): string {
+  return `${savedInSheets ? sesionCompletada : sesionCompletadaEnConsola} ${row[1]} km.`;
+}
+
+export const contenidoInvalido = "CONTENIDO INVÁLIDO";
+
+export const limiteAlcanzado =
+  "Superaste el límite de 50 mensajes por minuto. Este chat queda bloqueado durante 8 horas.";
+
+export const tableroPocoClaro =
+  "Alerta de validación: el tablero tiene nitidez o confianza menor al 30 %, o faltan datos legibles. Enfoca mejor el kilometraje y el indicador de combustible y envía otra foto.";
 
 export const facturaPocoClara =
-  "No pude leer la factura de combustible. Por favor, envía otra foto donde se vean claramente los datos de la recarga.";
+  "Alerta de validación: la factura tiene nitidez o confianza menor al 30 %, o faltan campos legibles. Enfoca toda la factura y envía otra foto.";
 
-export const MIN_CONFIDENCE_EXCLUSIVE = 80;
+export const MIN_CONFIDENCE = 30;
 
 export const fotoPocoClara =
-  "No se ve claro el kilometraje. Por favor, enfoca mejor el kilometraje y envía otra foto.";
+  "Alerta de validación: no se ve el kilometraje o su confianza es menor al 30 %. Enfoca mejor el kilometraje y envía otra foto.";
 
 export function lecturaConfiable(reading: DashboardReading): boolean {
   return reading.kilometraje_km !== null
+    && reading.nitidez_pct >= 30
+    && reading.confianza_lectura_pct >= 30
+    && Number.isInteger(reading.kilometraje_km)
+    && reading.kilometraje_km >= 0
     && reading.confianza_kilometraje_pct !== null
-    && reading.confianza_kilometraje_pct > MIN_CONFIDENCE_EXCLUSIVE;
+    && reading.confianza_kilometraje_pct >= MIN_CONFIDENCE
+    && reading.gasolina_estado !== "no_legible"
+    && reading.gasolina_porcentaje_aproximado !== null
+    && Number.isInteger(reading.gasolina_porcentaje_aproximado)
+    && reading.gasolina_porcentaje_aproximado >= 0
+    && reading.gasolina_porcentaje_aproximado <= 100;
 }
 
 export function lecturaConfirmada(reading: DashboardReading): string {

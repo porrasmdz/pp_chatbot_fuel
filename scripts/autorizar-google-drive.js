@@ -32,7 +32,7 @@ export function tokenToSave(tokens, previous, clientId) {
   return { refresh_token: refreshToken, scope, client_id: clientId };
 }
 
-async function loadOAuthClient(env) {
+export async function loadOAuthClient(env) {
   const envId = env.GOOGLE_DRIVE_CLIENT_ID?.trim();
   const envSecret = env.GOOGLE_DRIVE_CLIENT_SECRET?.trim();
   let clientId;

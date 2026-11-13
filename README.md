@@ -160,6 +160,14 @@ node scripts/autorizar-google-drive.js --force
 
 La autorización puede funcionar aunque la carpeta creada manualmente no sea visible para `drive.file`. En ese caso, el script lo indica y termina con error: [Google limita este alcance a archivos creados o seleccionados para la aplicación](https://developers.google.com/workspace/drive/api/guides/api-specific-auth). Puedes seleccionar la carpeta con Google Picker o crear una raíz administrada por la aplicación; este script no amplía los permisos ni crea archivos.
 
+Para crear y configurar una raíz **administrada por la aplicación** en Mi unidad, después de obtener el refresh token ejecuta:
+
+```bash
+node scripts/configurar-carpeta-drive.js
+```
+
+El script mantiene `drive.file`, busca una raíz existente marcada por la aplicación y solo crea `Global Crops - Respaldos` cuando hace falta. Verifica que puede consultarla y agregar archivos, actualiza únicamente `GOOGLE_DRIVE_ROOT_FOLDER_ID` en `.env` y muestra el ID y enlace. No toca la carpeta manual. Puedes ejecutarlo de nuevo sin crear otra carpeta. Si ya copiaste `.env` a la VPS, vuelve a copiarlo para que el contenedor use el ID nuevo; el refresh token de `keys/` no cambia.
+
 Si la pantalla de consentimiento de una aplicación **Externa** permanece en **Testing**, [Google puede caducar el refresh token de Drive a los siete días](https://developers.google.com/identity/protocols/oauth2). Para uso continuo, revisa Google Auth Platform > Audience y el estado de publicación de la aplicación; podría requerir verificación según los permisos y usuarios.
 
 En la VPS, copia el `.env` y la carpeta `keys/` como se explica en el despliegue. `compose.yaml` ya monta `./keys` en `/app/keys` como solo lectura. La futura integración deberá leer el refresh token y renovarse los access tokens **en memoria** mediante `OAuth2Client`, sin escribir en ese montaje. Si alguna vez necesitas persistir un refresh token nuevo, autoriza otra vez en tu PC y vuelve a copiar el archivo, o usa un volumen privado escribible con permisos restrictivos y escritura atómica. El callback `localhost` y el navegador solo se usan durante esta autorización local.

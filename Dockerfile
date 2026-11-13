@@ -15,5 +15,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
+COPY scripts/probar-alertas.js ./scripts/probar-alertas.js
 
 CMD ["node", "dist/index.js"]

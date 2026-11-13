@@ -2,6 +2,34 @@
 
 Este bot usa Baileys, Node.js y TypeScript. Recibe dos fotos por WhatsApp en cualquier orden: tablero y factura de combustible. La primera foto abre una sesión de **5 minutos**. El bot espera **5 segundos** antes de analizar y responder, para reunir las dos fotos si llegan juntas. Si solo llega una foto válida, confirma la sesión y pide la otra en un único mensaje. Para el registro automático, cada foto requiere todos sus campos legibles y porcentajes de nitidez y confianza de al menos **30 %**. La nitidez de 30 a 79 % se registra en `FOTOS_SIN_NITIDEZ` sin notificarla por WhatsApp. Solo un porcentaje menor de 30 % o un campo faltante, incluido `COMBUSTIBLE`, aparece como error `🔴`. El bot muestra los errores de cada foto. Cuando ya recibió ambas fotos y faltan campos legibles, permite aclararlos por texto durante 1 minuto. Con ambas fotos válidas agrega una fila a Google Sheets, envía una confirmación breve con `✅` y cierra la sesión. La validación del teléfono contra `PERSONAS` está desactivada por ahora.
 
+## Alertas de repostajes
+
+`AlertasService` consulta Google Sheets en modo de solo lectura y entrega un JSON con el resumen, las alertas, los repostajes originales de `Matriz` y los errores de conciliación. Reutiliza `GOOGLE_SPREADSHEET_ID` y `GOOGLE_APPLICATION_CREDENTIALS` del `.env`; la cuenta de servicio necesita acceso de lectura a la hoja.
+
+Desde la raíz del repositorio:
+
+```bash
+npm ci
+npm run build
+node scripts/probar-alertas.js
+```
+
+Sin argumentos, el script detecta la fecha en `America/Guayaquil` y consulta **todo el mes actual**, del día 1 al último día. Por ejemplo, al ejecutarlo en noviembre de 2026, usa `2026-11-01` a `2026-11-30`. También puedes indicar otro período sin cambiar `PARAMETROS`:
+
+```bash
+node scripts/probar-alertas.js --inicio=2026-11-01 --fin=2026-11-25
+```
+
+La salida estándar contiene únicamente el JSON completo. Los errores de ejecución van a la salida de errores. `fecha` y `hora` de cada repostaje provienen de `Matriz!D:E`; `numeroFactura` es solo una referencia del comprobante. `filaMatriz` ayuda a encontrar el registro hoy, mientras `idRegistro` usa placa, fecha, hora y factura para resistir cambios de orden. Una alerta diaria puede contener varios repostajes; las alertas de kilometraje y presupuesto indican su período y todos los registros usados. Si una recarga no se puede relacionar con certeza, aparece en `erroresConciliacion`.
+
+En la VPS, tras descargar la imagen de GHCR con `docker compose pull`, puedes ejecutar el mismo reporte con las credenciales montadas por Compose:
+
+```bash
+docker compose run --rm chatbot node scripts/probar-alertas.js
+```
+
+El rango de mes completo incluye los registros ya presentes en Sheets con fechas posteriores al día de ejecución, hasta el último día del mes. Para un corte al día de hoy, pasa `--fin=YYYY-MM-DD`.
+
 ## Imagen Docker y GitHub Container Registry
 
 La imagen ejecuta el bot con Node.js 22. Construye la imagen desde la raíz del repositorio:

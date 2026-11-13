@@ -5,7 +5,7 @@ import { analyzeImage } from "../src/analyze.ts";
 import { incomingImage, whatsappSentAt } from "../src/index.ts";
 import { analyzeInvoice, facturaLegible } from "../src/invoice.ts";
 import { photoWarningRow, PHOTO_WARNING_HEADERS, readingRow, SHEET_HEADERS } from "../src/sheets.ts";
-import { facturaPocoClara, fotoPocoClara, lecturaConfiable, pedirFactura } from "../src/templates.ts";
+import { facturaPocoClara, fotoPocoClara, lecturaConfiable, mensajeRegistroExitoso, pedirFactura } from "../src/templates.ts";
 import { dashboardIssues, invoiceIssues, validationMessage } from "../src/validation.ts";
 
 test("reconoce fotos entrantes de chats privados", () => {
@@ -57,6 +57,10 @@ test("ordena las diecisiete columnas según su origen", () => {
     reading: { nitidez_pct: 95, confianza_lectura_pct: 90, kilometraje_km: 189350, confianza_kilometraje_pct: 87, gasolina_estado: "reserva", gasolina_porcentaje_aproximado: 10, observaciones: "Visible" },
     invoice: { es_factura: true, nitidez_pct: 95, confianza_lectura_pct: 90, galones: 10, cantidad: 10, valor_recarga: 25, tipo_combustible: "Extra", precio_por_galon: 2.5, placa: "ABC1234", ruc_estacion: "1234567890001", estacion_servicio: "Estación Centro", numero_factura: "001-001-000000123", fecha_factura: "2026-10-11", hora_factura: "14:30", subtotal: 22.32, iva: 2.68 },
   }), ["593999999999", 189350, "reserva (10%)", "2026-10-10", "21:00:00", 2.5, 10, "Extra", 25, "ABC1234", "1234567890001", "Estación Centro", "001-001-000000123", "2026-10-11", "14:30", 22.32, 2.68]);
+});
+
+test("confirma el envío exitoso sin incluir datos del registro", () => {
+  assert.equal(mensajeRegistroExitoso, "✅ Envío exitoso.");
 });
 
 test("valida campos, acepta nitidez y confianza desde 30", () => {

@@ -122,7 +122,7 @@ async function startWhatsApp(): Promise<void> {
     }
     closeSession(jid, session);
     try {
-      await activeSocket.sendMessage(jid, { text: mensajeRegistroExitoso(row, Boolean(sheetConfig)) });
+      await activeSocket.sendMessage(jid, { text: mensajeRegistroExitoso });
     } catch (error) {
       console.error(`Registro completo para ${jid}, pero falló el envío de la confirmación:`, error);
     }

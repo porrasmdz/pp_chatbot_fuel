@@ -12,15 +12,7 @@ export const primeraFotoRecibida =
 export const sesionExpirada =
   "Sesión cerrada: faltó una foto válida dentro de 5 minutos.";
 
-export const sesionCompletada =
-  "✅ Registro guardado. Sesión cerrada.";
-
-export const sesionCompletadaEnConsola =
-  "✅ Fotos validadas. Datos en consola. Sesión cerrada.";
-
-export function mensajeRegistroExitoso(row: Array<string | number>, savedInSheets: boolean): string {
-  return `${savedInSheets ? sesionCompletada : sesionCompletadaEnConsola} ${row[1]} km.`;
-}
+export const mensajeRegistroExitoso = "✅ Envío exitoso.";
 
 export const contenidoInvalido = "CONTENIDO INVÁLIDO";
 

@@ -110,6 +110,8 @@ GOOGLE_APPLICATION_CREDENTIALS=./google-service-account.json
 
 El archivo de credenciales y `.env` están excluidos de Git. `TELF` lo define el servicio Node.js a partir del remitente: guarda el número cuando WhatsApp lo entrega y el WhatsApp ID `@lid` en caso contrario. `KILOMETRAJE` y `COMBUSTIBLE` salen de la foto del tablero. `FECHA` y `HORA` salen de la marca de tiempo del **segundo mensaje de foto válido de WhatsApp**, convertida a `America/Guayaquil`; no se extraen de la imagen. Las columnas restantes salen de la foto de la factura. `FECHA FACTURA` y `HORA FACTURA` se leen del comprobante y pueden diferir de `FECHA` y `HORA`. `Cantidad` también se extrae y valida, pero no se escribe en Sheets porque no hay una columna para ella. El prompt reconoce `Cantidad`, `CANT.`, `CTD`, `CND`, `CAN`, `CAM.` y `QTY`, y busca el valor a la izquierda del grupo `Cantidad / Valor / Total` cuando la etiqueta se ve borrosa. `NÚMERO DE FACTURA` es opcional: si no se distingue, queda vacío en la matriz principal y se anota el motivo en `FOTOS_SIN_NITIDEZ`. Los demás campos de la factura siguen siendo obligatorios. La foto se procesa para extraer datos; no se almacena en Drive ni en Sheets. La fila se agrega solo después de recibir las dos fotos válidas. Si Google Sheets no está configurado, el resultado se imprime como JSON en consola.
 
+El bot escribe únicamente en las columnas A:Q de la siguiente fila disponible, sin insertar una fila completa. Así conserva las fórmulas que ya tengas preparadas en R y S. Para filas futuras, extiende esas fórmulas previamente o usa una fórmula de columna como `ARRAYFORMULA`.
+
 ## Uso
 
 ```powershell

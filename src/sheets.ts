@@ -130,7 +130,7 @@ export async function appendReading(
     spreadsheetId: config.spreadsheetId,
     range: `'${safeSheetName}'!A:Q`,
     valueInputOption: "RAW",
-    insertDataOption: "INSERT_ROWS",
+    insertDataOption: "OVERWRITE",
     requestBody: { values: [readingRow(input)] },
   });
   if (result.data.updates?.updatedRows !== 1) throw new Error("Google Sheets no confirmó la fila agregada");

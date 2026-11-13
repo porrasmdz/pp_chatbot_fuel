@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { WAMessage } from "@whiskeysockets/baileys";
 import { analyzeImage } from "../src/analyze.ts";
-import { incomingImage, whatsappSentAt } from "../src/index.ts";
+import { incomingImage, incomingText, whatsappSentAt } from "../src/index.ts";
 import { analyzeInvoice, facturaLegible } from "../src/invoice.ts";
 import { photoWarningRow, PHOTO_WARNING_HEADERS, readingRow, SHEET_HEADERS } from "../src/sheets.ts";
 import { facturaPocoClara, fotoPocoClara, lecturaConfiable, mensajeRegistroExitoso, pedirFactura } from "../src/templates.ts";
@@ -18,6 +18,13 @@ test("reconoce fotos entrantes de chats privados", () => {
   assert.equal(incomingImage({ ...message, key: { ...message.key, fromMe: true } }), null);
   assert.equal(incomingImage({ ...message, key: { ...message.key, remoteJid: "123@g.us" } }), null);
   assert.equal(whatsappSentAt(message)?.toISOString(), "2026-10-11T02:00:00.000Z");
+});
+
+test("extrae la aclaración de mensajes de texto simples y citados", () => {
+  const base = { key: { id: "TXT1", remoteJid: "593999999999@s.whatsapp.net", fromMe: false } } as WAMessage;
+  assert.equal(incomingText({ ...base, message: { conversation: "PLACA: ABC1234" } }), "PLACA: ABC1234");
+  assert.equal(incomingText({ ...base, message: { extendedTextMessage: { text: "KILOMETRAJE: 189350" } } }), "KILOMETRAJE: 189350");
+  assert.equal(incomingText({ ...base, message: { stickerMessage: {} } }), null);
 });
 
 test("extrae tablero y factura con esquemas distintos", async () => {

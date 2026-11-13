@@ -11,6 +11,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import { analyzeImage, type DashboardReading } from "./analyze.js";
+import { applyClarification, fieldsToClarify } from "./clarification.js";
 import { analyzeInvoice, camposFacturaFaltantes, facturaLegible, type InvoiceReading } from "./invoice.js";
 import { RateLimiter } from "./rate-limit.js";
 import { appendPhotoWarning, appendReading, photoWarningRow, readingRow, sheetConfigFromEnv } from "./sheets.js";
@@ -20,6 +21,7 @@ import { dashboardIssues, invoiceIssues, validationMessage } from "./validation.
 const SESSION_DIR = join(process.env.APP_DATA_DIR || ".", "auth_info_baileys");
 const SESSION_WINDOW_MS = 5 * 60_000;
 const PHOTO_BATCH_MS = 5_000;
+const CLARIFICATION_WINDOW_MS = 60_000;
 const seen = new Set<string>();
 
 type IncomingImage = { id: string; mime: string; numeroUsuario: string | null; remitenteJid: string };
@@ -32,6 +34,9 @@ type PendingSession = {
   phone: string | null;
   reading?: DashboardReading;
   invoice?: InvoiceReading;
+  dashboardPhoto?: { image: IncomingImage; receivedAt: number };
+  invoicePhoto?: { image: IncomingImage; receivedAt: number };
+  awaitingClarification?: { fields: string[]; deadline: number };
   dashboardMessageId?: string;
   invoiceMessageId?: string;
   lastValidSentAt?: Date;
@@ -43,6 +48,11 @@ export function incomingImage(message: WAMessage): IncomingImage | null {
   const image = extractMessageContent(message.message)?.imageMessage;
   if (!image) return null;
   return { ...sender, mime: image.mimetype || "image/jpeg" };
+}
+
+export function incomingText(message: WAMessage): string | null {
+  const content = extractMessageContent(message.message);
+  return content?.conversation ?? content?.extendedTextMessage?.text ?? null;
 }
 
 export function whatsappSentAt(message: WAMessage): Date | null {
@@ -128,6 +138,71 @@ async function startWhatsApp(): Promise<void> {
     }
   }
 
+  async function requestClarification(jid: string, session: PendingSession): Promise<void> {
+    if (!session.reading || !session.invoice) return;
+    const fields = fieldsToClarify(session.reading, session.invoice);
+    const dashboardFields = fields.filter(field => field === "KILOMETRAJE" || field === "COMBUSTIBLE");
+    const invoiceFields = fields.filter(field => field !== "KILOMETRAJE" && field !== "COMBUSTIBLE");
+    const errors = validationMessage(invoiceFields.map(field => `No se ve ${field}`), dashboardFields.map(field => `No se ve ${field}`));
+    const guidance = `Envía los campos indicados en un solo mensaje de texto, uno por línea con formato CAMPO: valor. Tienes 1 minuto. Para COMBUSTIBLE incluye estado y porcentaje (ej.: COMBUSTIBLE: medio 50%). Campos: ${fields.join(", ")}.`;
+    await activeSocket.sendMessage(jid, { text: `${errors}\n${guidance}` });
+    clearTimeout(session.timer);
+    const deadline = Date.now() + CLARIFICATION_WINDOW_MS;
+    session.deadline = deadline;
+    session.awaitingClarification = { fields, deadline };
+    session.timer = setTimeout(() => {
+      enqueue(jid, async () => {
+        if (sessions.get(jid) !== session || !session.awaitingClarification) return;
+        closeSession(jid, session);
+        await activeSocket.sendMessage(jid, { text: "No recibí la aclaración en 1 minuto. Sesión cerrada; envía las dos fotos de nuevo." });
+      });
+    }, CLARIFICATION_WINDOW_MS);
+  }
+
+  async function acceptClarification(jid: string, session: PendingSession, text: string | null, receivedAt: number): Promise<void> {
+    const pending = session.awaitingClarification;
+    if (!pending) return;
+    if (receivedAt > pending.deadline) {
+      closeSession(jid, session);
+      await activeSocket.sendMessage(jid, { text: "Terminó el minuto para aclarar los campos. Envía las dos fotos de nuevo." });
+      return;
+    }
+    if (!text || !session.reading || !session.invoice) {
+      await activeSocket.sendMessage(jid, { text: "Envía la aclaración como mensaje de texto con formato CAMPO: valor." });
+      return;
+    }
+    const result = applyClarification(session.reading, session.invoice, pending.fields, text);
+    if (!result.ok) {
+      await activeSocket.sendMessage(jid, { text: `${result.errors.join("\n")}\nCorrige y envía todos los campos solicitados antes de que termine el minuto.` });
+      return;
+    }
+    const detail = text.trim().replace(/\s+/g, " ");
+    try {
+      if (pending.fields.some(field => field === "KILOMETRAJE" || field === "COMBUSTIBLE") && session.dashboardPhoto) {
+        const { image } = session.dashboardPhoto;
+        await logPhotoWarning(jid, image, receivedAt, session.reading.nitidez_pct, `TABLERO - ACLARACIÓN DEL USUARIO: ${detail}`);
+      }
+      if (pending.fields.some(field => field !== "KILOMETRAJE" && field !== "COMBUSTIBLE") && session.invoicePhoto) {
+        const { image } = session.invoicePhoto;
+        await logPhotoWarning(jid, image, receivedAt, session.invoice.nitidez_pct, `FACTURA - ACLARACIÓN DEL USUARIO: ${detail}`);
+      }
+    } catch (error) {
+      console.error(`No se registró la aclaración de ${jid}:`, error);
+      await activeSocket.sendMessage(jid, { text: "No pude registrar la aclaración. Envíala otra vez antes de que termine el minuto." });
+      return;
+    }
+    session.reading = result.reading;
+    session.invoice = result.invoice;
+    session.awaitingClarification = undefined;
+    try {
+      await completeSession(jid, session);
+    } catch (error) {
+      console.error(`No se guardó el registro aclarado de ${jid}:`, error);
+      await activeSocket.sendMessage(jid, { text: "No pude guardar el registro. Envía las dos fotos de nuevo." });
+      closeSession(jid, session);
+    }
+  }
+
   async function flushBatch(jid: string, session: PendingSession, final = false): Promise<void> {
     if (sessions.get(jid) !== session || rateLimiter.isBlocked(jid)) return;
     if (session.batchTimer) clearTimeout(session.batchTimer);
@@ -155,7 +230,7 @@ async function startWhatsApp(): Promise<void> {
           console.log(`Confianza factura (${image.id}): ${invoice.confianza_lectura_pct}%`);
           const missingInvoiceFields = camposFacturaFaltantes(invoice);
           if (!invoice.numero_factura?.trim()) missingInvoiceFields.push("NÚMERO DE FACTURA");
-          if ((invoice.nitidez_pct >= 30 && invoice.nitidez_pct < 80) || !invoice.numero_factura?.trim()) {
+          if ((invoice.nitidez_pct >= 30 && invoice.nitidez_pct < 80) || missingInvoiceFields.length > 0) {
             const tipo = missingInvoiceFields.length ? `FACTURA - ${missingInvoiceFields.map(field => `${field} NO SE VE`).join(", ")}` : "FACTURA";
             try { await logPhotoWarning(jid, image, receivedAt, invoice.nitidez_pct, tipo); }
             catch (error) {
@@ -166,13 +241,12 @@ async function startWhatsApp(): Promise<void> {
           }
           const issues = invoiceIssues(invoice);
           if (!facturaLegible(invoice)) invoiceErrors.push(...(issues.length ? issues : ["No se pudieron validar todos los campos de la factura"]));
-          else {
-            session.invoice = invoice;
-            session.invoiceMessageId = image.id;
-            session.lastValidSentAt = sentAt;
-            session.phone ??= image.numeroUsuario;
-            if (session.reading) break;
-          }
+          session.invoice = invoice;
+          session.invoicePhoto = { image, receivedAt };
+          session.invoiceMessageId = image.id;
+          session.lastValidSentAt = sentAt;
+          session.phone ??= image.numeroUsuario;
+          if (session.reading && lecturaConfiable(session.reading) && facturaLegible(invoice)) break;
           continue;
         }
 
@@ -181,10 +255,10 @@ async function startWhatsApp(): Promise<void> {
         console.log(`Confianza del kilometraje (${image.id}): ${reading.confianza_kilometraje_pct === null ? "no disponible" : `${reading.confianza_kilometraje_pct}%`}`);
         console.log(`Nitidez tablero (${image.id}): ${reading.nitidez_pct}%`);
         console.log(`Confianza tablero (${image.id}): ${reading.confianza_lectura_pct}%`);
-        if (reading.nitidez_pct >= 30 && reading.nitidez_pct < 80) {
-          const missingDashboardFields: string[] = [];
-          if (reading.kilometraje_km === null) missingDashboardFields.push("KILOMETRAJE");
-          if (reading.gasolina_estado === "no_legible" || reading.gasolina_porcentaje_aproximado === null) missingDashboardFields.push("COMBUSTIBLE");
+        const missingDashboardFields: string[] = [];
+        if (reading.kilometraje_km === null || reading.confianza_kilometraje_pct === null || reading.confianza_kilometraje_pct < 30) missingDashboardFields.push("KILOMETRAJE");
+        if (reading.gasolina_estado === "no_legible" || reading.gasolina_porcentaje_aproximado === null) missingDashboardFields.push("COMBUSTIBLE");
+        if ((reading.nitidez_pct >= 30 && reading.nitidez_pct < 80) || missingDashboardFields.length > 0) {
           const tipo = missingDashboardFields.length ? `TABLERO - ${missingDashboardFields.map(field => `${field} NO SE VE`).join(", ")}` : "TABLERO";
           try { await logPhotoWarning(jid, image, receivedAt, reading.nitidez_pct, tipo); }
           catch (error) {
@@ -195,13 +269,12 @@ async function startWhatsApp(): Promise<void> {
         }
         const issues = dashboardIssues(reading);
         if (!lecturaConfiable(reading)) dashboardErrors.push(...(issues.length ? issues : ["No se pudieron validar todos los datos del tablero"]));
-        else {
-          session.reading = reading;
-          session.dashboardMessageId = image.id;
-          session.lastValidSentAt = sentAt;
-          session.phone ??= image.numeroUsuario;
-          if (session.invoice) break;
-        }
+        session.reading = reading;
+        session.dashboardPhoto = { image, receivedAt };
+        session.dashboardMessageId = image.id;
+        session.lastValidSentAt = sentAt;
+        session.phone ??= image.numeroUsuario;
+        if (session.invoice && facturaLegible(session.invoice) && lecturaConfiable(reading)) break;
       } catch (error) {
         console.error(`Error al procesar ${image.id}:`, error);
         const detail = "No pude procesar la foto; envíala otra vez";
@@ -212,23 +285,36 @@ async function startWhatsApp(): Promise<void> {
     }
 
     if (session.reading && session.invoice) {
-      try {
-        await completeSession(jid, session);
-      } catch (error) {
-        console.error(`Error al guardar el registro de ${jid}:`, error);
-        if (final) {
-          closeSession(jid, session);
-          await activeSocket.sendMessage(jid, { text: "No pude guardar el registro y la sesión de 5 minutos se cerró. Envía las dos fotos de nuevo." });
-        } else {
-          await activeSocket.sendMessage(jid, { text: "No pude guardar el registro. La sesión sigue activa; envía de nuevo la última foto." });
+      if (lecturaConfiable(session.reading) && facturaLegible(session.invoice)) {
+        try {
+          await completeSession(jid, session);
+        } catch (error) {
+          console.error(`Error al guardar el registro de ${jid}:`, error);
+          if (final) {
+            closeSession(jid, session);
+            await activeSocket.sendMessage(jid, { text: "No pude guardar el registro y la sesión de 5 minutos se cerró. Envía las dos fotos de nuevo." });
+          } else {
+            await activeSocket.sendMessage(jid, { text: "No pude guardar el registro. La sesión sigue activa; envía de nuevo la última foto." });
+          }
         }
+        return;
       }
+      if (session.reading.nitidez_pct >= 30 && session.invoice.nitidez_pct >= 30 && fieldsToClarify(session.reading, session.invoice).length > 0) {
+        await requestClarification(jid, session);
+        return;
+      }
+      const errors = validationMessage(invoiceIssues(session.invoice), dashboardIssues(session.reading));
+      if (final) {
+        closeSession(jid, session);
+        await activeSocket.sendMessage(jid, { text: `${errors}\nSesión cerrada.` });
+      } else await activeSocket.sendMessage(jid, { text: errors });
       return;
     }
 
-    if (photos.length === 1 && invoiceErrors.length === 0 && dashboardErrors.length === 0 && !final) {
+    if ((session.reading || session.invoice) && !final && !(session.reading && session.invoice)) {
       const request = session.invoice ? pedirKilometraje : pedirFactura;
-      await activeSocket.sendMessage(jid, { text: `${primeraFotoRecibida}\n${request}` });
+      const errors = validationMessage(invoiceErrors, dashboardErrors);
+      await activeSocket.sendMessage(jid, { text: `${errors ? `${errors}\n` : ""}${primeraFotoRecibida}\n${request}` });
       return;
     }
     const hasPhotoErrors = invoiceErrors.length > 0 || dashboardErrors.length > 0;
@@ -251,7 +337,7 @@ async function startWhatsApp(): Promise<void> {
       photos: [],
       timer: setTimeout(() => {
         enqueue(jid, async () => {
-          if (sessions.get(jid) !== session) return;
+          if (sessions.get(jid) !== session || session.awaitingClarification) return;
           if (session.photos.length) await flushBatch(jid, session, true);
           else {
             closeSession(jid, session);
@@ -270,8 +356,13 @@ async function startWhatsApp(): Promise<void> {
     if (rateLimiter.isBlocked(jid)) return;
     let session = sessions.get(jid);
     if (session && receivedAt > session.deadline) {
+      const wasClarifying = Boolean(session.awaitingClarification);
       closeSession(jid, session);
-      await activeSocket.sendMessage(jid, { text: sesionExpirada });
+      await activeSocket.sendMessage(jid, { text: wasClarifying ? "Terminó el minuto para aclarar los campos. Envía las dos fotos de nuevo." : sesionExpirada });
+      return;
+    }
+    if (session?.awaitingClarification) {
+      await activeSocket.sendMessage(jid, { text: "Ya recibí las dos fotos. Envía los campos solicitados en un mensaje de texto antes de que termine el minuto." });
       return;
     }
     session ??= startSession(jid, receivedAt, image.numeroUsuario);
@@ -331,6 +422,10 @@ async function startWhatsApp(): Promise<void> {
           enqueue(sender.remitenteJid, async () => {
             if (rateLimiter.isBlocked(sender.remitenteJid)) return;
             const session = sessions.get(sender.remitenteJid);
+            if (session?.awaitingClarification) {
+              await acceptClarification(sender.remitenteJid, session, incomingText(message), receivedAt);
+              return;
+            }
             if (session && receivedAt <= session.deadline) await activeSocket.sendMessage(sender.remitenteJid, { text: contenidoInvalido });
           });
         }

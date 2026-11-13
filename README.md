@@ -1,6 +1,6 @@
 # MVP: tablero y factura por WhatsApp
 
-Este bot usa Baileys, Node.js y TypeScript. Recibe dos fotos por WhatsApp en cualquier orden: tablero y factura de combustible. La primera foto abre una sesión de **5 minutos**. El bot espera **5 segundos** antes de analizar y responder, para reunir las dos fotos si llegan juntas. Si solo llega una foto válida, confirma la sesión y pide la otra en un único mensaje. Cada foto requiere todos sus campos legibles y porcentajes de nitidez y confianza de al menos **30 %**. La nitidez de 30 a 79 % se registra en `FOTOS_SIN_NITIDEZ` sin notificarla por WhatsApp. Solo un porcentaje menor de 30 % o un campo faltante, incluido `COMBUSTIBLE`, aparece como error `🔴`. El bot muestra únicamente los encabezados de las fotos con errores y pide repetir la toma mostrando los campos faltantes. Con ambas fotos válidas agrega una fila a Google Sheets, envía una confirmación breve con `✅` y cierra la sesión. La validación del teléfono contra `PERSONAS` está desactivada por ahora.
+Este bot usa Baileys, Node.js y TypeScript. Recibe dos fotos por WhatsApp en cualquier orden: tablero y factura de combustible. La primera foto abre una sesión de **5 minutos**. El bot espera **5 segundos** antes de analizar y responder, para reunir las dos fotos si llegan juntas. Si solo llega una foto válida, confirma la sesión y pide la otra en un único mensaje. Para el registro automático, cada foto requiere todos sus campos legibles y porcentajes de nitidez y confianza de al menos **30 %**. La nitidez de 30 a 79 % se registra en `FOTOS_SIN_NITIDEZ` sin notificarla por WhatsApp. Solo un porcentaje menor de 30 % o un campo faltante, incluido `COMBUSTIBLE`, aparece como error `🔴`. El bot muestra los errores de cada foto. Cuando ya recibió ambas fotos y faltan campos legibles, permite aclararlos por texto durante 1 minuto. Con ambas fotos válidas agrega una fila a Google Sheets, envía una confirmación breve con `✅` y cierra la sesión. La validación del teléfono contra `PERSONAS` está desactivada por ahora.
 
 ## Imagen Docker y GitHub Container Registry
 
@@ -111,6 +111,18 @@ GOOGLE_APPLICATION_CREDENTIALS=./google-service-account.json
 El archivo de credenciales y `.env` están excluidos de Git. `TELF` lo define el servicio Node.js a partir del remitente: guarda el número cuando WhatsApp lo entrega y el WhatsApp ID `@lid` en caso contrario. `KILOMETRAJE` y `COMBUSTIBLE` salen de la foto del tablero. `FECHA` y `HORA` salen de la marca de tiempo del **segundo mensaje de foto válido de WhatsApp**, convertida a `America/Guayaquil`; no se extraen de la imagen. Las columnas restantes salen de la foto de la factura. `FECHA FACTURA` y `HORA FACTURA` se leen del comprobante y pueden diferir de `FECHA` y `HORA`. `Cantidad` también se extrae y valida, pero no se escribe en Sheets porque no hay una columna para ella. El prompt reconoce `Cantidad`, `CANT.`, `CTD`, `CND`, `CAN`, `CAM.` y `QTY`, y busca el valor a la izquierda del grupo `Cantidad / Valor / Total` cuando la etiqueta se ve borrosa. `NÚMERO DE FACTURA` es opcional: si no se distingue, queda vacío en la matriz principal y se anota el motivo en `FOTOS_SIN_NITIDEZ`. Los demás campos de la factura siguen siendo obligatorios. La foto se procesa para extraer datos; no se almacena en Drive ni en Sheets. La fila se agrega solo después de recibir las dos fotos válidas. Si Google Sheets no está configurado, el resultado se imprime como JSON en consola.
 
 El bot escribe únicamente en las columnas A:Q de la siguiente fila disponible, sin insertar una fila completa. Así conserva las fórmulas que ya tengas preparadas en R y S. Para filas futuras, extiende esas fórmulas previamente o usa una fórmula de columna como `ARRAYFORMULA`.
+
+## Aclaración de campos por mensaje
+
+Si ya llegaron las fotos de tablero y factura, ambas tienen nitidez de al menos 30 % y algún campo obligatorio no se pudo leer, el bot muestra esos campos y abre una ventana de **1 minuto**. Responde con **un solo mensaje de texto**, un campo por línea y con el formato `CAMPO: valor`. Usa los nombres que te envía el bot; por ejemplo:
+
+```text
+KILOMETRAJE: 189350
+COMBUSTIBLE: medio 50%
+PLACA: ABC1234
+```
+
+Si solo falta un campo, también puedes enviar únicamente su valor. Se aceptan decimales con punto o coma, fechas `YYYY-MM-DD` y horas `HH:mm`. El bot valida todos los campos solicitados; si el texto es inválido, permite corregirlo dentro del mismo minuto. La aclaración aceptada se anota en la columna `TIPO` de `FOTOS_SIN_NITIDEZ`, con la fecha, hora, teléfono y nitidez de la foto correspondiente. Después se completa la fila principal. Si el minuto termina, hay que enviar las dos fotos de nuevo. Si una foto tiene nitidez menor de 30 %, se debe repetir esa foto: el texto no reemplaza una foto demasiado borrosa.
 
 ## Uso
 

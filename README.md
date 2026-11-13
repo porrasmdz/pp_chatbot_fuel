@@ -142,6 +142,28 @@ El archivo de credenciales y `.env` están excluidos de Git. `TELF` lo define el
 
 El bot escribe únicamente en las columnas A:Q de la siguiente fila disponible, sin insertar una fila completa. Así conserva las fórmulas que ya tengas preparadas en R y S. Para filas futuras, extiende esas fórmulas previamente o usa una fórmula de columna como `ARRAYFORMULA`.
 
+## Autorizar Google Drive (una sola vez, en tu PC)
+
+El script `scripts/autorizar-google-drive.js` usa OAuth 2.0 para tu cuenta personal. Reutiliza `keys/google-drive-oauth.json` (cliente **Aplicación web**) si ya existe; también acepta `GOOGLE_DRIVE_CLIENT_ID` y `GOOGLE_DRIVE_CLIENT_SECRET` en `.env`. No usa ni reemplaza `keys/gcloud-keys.json`, la cuenta de servicio de Sheets.
+
+En `.env`, configura `GOOGLE_DRIVE_ROOT_FOLDER_ID` con la ID de la carpeta raíz (la parte posterior a `/folders/` en su URL). La redirección predeterminada es `http://localhost:3000/oauth2callback`: regístrala **exactamente** en Google Cloud Console > Google Auth Platform > Clientes > tu cliente web > URI de redireccionamiento autorizados. El token se guarda en `./keys/google-drive-token.json` o en `GOOGLE_DRIVE_TOKEN_PATH` si indicas otra ruta. Estos archivos privados están ignorados por Git.
+
+```bash
+node scripts/autorizar-google-drive.js
+```
+
+El script abre el navegador y también muestra el enlace de autorización. Solicita únicamente `drive.file`, guarda el refresh token con permisos restrictivos, verifica OAuth y Drive API con peticiones reales, y comprueba **por separado** la carpeta raíz y si permite agregar archivos. La segunda ejecución reutiliza el token sin abrir el navegador si sigue válido. Para volver a autorizar:
+
+```bash
+node scripts/autorizar-google-drive.js --force
+```
+
+La autorización puede funcionar aunque la carpeta creada manualmente no sea visible para `drive.file`. En ese caso, el script lo indica y termina con error: [Google limita este alcance a archivos creados o seleccionados para la aplicación](https://developers.google.com/workspace/drive/api/guides/api-specific-auth). Puedes seleccionar la carpeta con Google Picker o crear una raíz administrada por la aplicación; este script no amplía los permisos ni crea archivos.
+
+Si la pantalla de consentimiento de una aplicación **Externa** permanece en **Testing**, [Google puede caducar el refresh token de Drive a los siete días](https://developers.google.com/identity/protocols/oauth2). Para uso continuo, revisa Google Auth Platform > Audience y el estado de publicación de la aplicación; podría requerir verificación según los permisos y usuarios.
+
+En la VPS, copia el `.env` y la carpeta `keys/` como se explica en el despliegue. `compose.yaml` ya monta `./keys` en `/app/keys` como solo lectura. La futura integración deberá leer el refresh token y renovarse los access tokens **en memoria** mediante `OAuth2Client`, sin escribir en ese montaje. Si alguna vez necesitas persistir un refresh token nuevo, autoriza otra vez en tu PC y vuelve a copiar el archivo, o usa un volumen privado escribible con permisos restrictivos y escritura atómica. El callback `localhost` y el navegador solo se usan durante esta autorización local.
+
 ## Aclaración de campos por mensaje
 
 Si ya llegaron las fotos de tablero y factura, ambas tienen nitidez de al menos 30 % y algún campo obligatorio no se pudo leer, el bot muestra esos campos y abre una ventana de **1 minuto**. Responde con **un solo mensaje de texto**, un campo por línea y con el formato `CAMPO: valor`. Usa los nombres que te envía el bot; por ejemplo:

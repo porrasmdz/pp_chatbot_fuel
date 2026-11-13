@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+.env.*
+!.env.example
 auth_info_baileys/
 rate_limits.json
 rate_limits.json.tmp
@@ -8,3 +10,4 @@ google-service-account.json
 keys/
 keys
 keys/*
+google-drive-token*.json

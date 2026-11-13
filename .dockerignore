@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+node_modules
+dist
+auth_info_baileys
+rate_limits.json
+rate_limits.json.tmp
+google-service-account.json
+keys
+*.pem
+*.key

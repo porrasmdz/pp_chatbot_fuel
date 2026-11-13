@@ -1,9 +1,25 @@
-BORRAR APIKEY Openrouter - Openclaw
-SE LEAKEO POR CLI
-
 # MVP: tablero y factura por WhatsApp
 
 Este bot usa Baileys, Node.js y TypeScript. Recibe dos fotos por WhatsApp en cualquier orden: tablero y factura de combustible. La primera foto abre una sesión de **5 minutos**. El bot espera **5 segundos** antes de analizar y responder, para reunir las dos fotos si llegan juntas. Si solo llega una foto válida, confirma la sesión y pide la otra en un único mensaje. Cada foto requiere todos sus campos legibles y porcentajes de nitidez y confianza de al menos **30 %**. La nitidez de 30 a 79 % se registra en `FOTOS_SIN_NITIDEZ` sin notificarla por WhatsApp. Solo un porcentaje menor de 30 % o un campo faltante, incluido `COMBUSTIBLE`, aparece como error `🔴`. El bot muestra únicamente los encabezados de las fotos con errores y pide repetir la toma mostrando los campos faltantes. Con ambas fotos válidas agrega una fila a Google Sheets, envía una confirmación breve con `✅` y cierra la sesión. La validación del teléfono contra `PERSONAS` está desactivada por ahora.
+
+## Imagen Docker y GitHub Container Registry
+
+La imagen ejecuta el bot con Node.js 22. Construye la imagen desde la raíz del repositorio:
+
+```powershell
+docker build -t ghcr.io/porrasmdz/pp_chatbot_fuel:latest .
+```
+
+Para publicarla en GitHub Container Registry, usa un personal access token (classic) de GitHub con permiso `write:packages` y ejecuta:
+
+```powershell
+$env:GHCR_TOKEN = "TU_TOKEN"
+$env:GHCR_TOKEN | docker login ghcr.io -u porrasmdz --password-stdin
+docker push ghcr.io/porrasmdz/pp_chatbot_fuel:latest
+Remove-Item Env:GHCR_TOKEN
+```
+
+Para iniciar el bot en Docker, pasa la configuración mediante `--env-file`. Monta un directorio persistente para `auth_info_baileys/` y el archivo JSON de credenciales de Google si usas Sheets. El Dockerfile no incorpora `.env`, claves ni sesiones de WhatsApp a la imagen.
 
 ## Preparación
 

@@ -49,6 +49,40 @@ export type ErrorConciliacion = {
   motivo: string;
 };
 
+export type EventoCalendario = Omit<RepostajeRef, "filaMatriz"> & {
+  empleado: string | null;
+  tiposAlerta: AlertType[];
+};
+
+export type DiaCalendario = {
+  fecha: string;
+  numeroDia: number;
+  diaSemana: string;
+  repostadores: string[];
+  repostadoresFueraDeJornada: string[];
+  repostadoresMasDeUnRepostaje: string[];
+  repostadoresPicoRecarga: string[];
+  validadores: {
+    viernes: string | null;
+    jornada: string | null;
+    masDeUnRepostaje: string | null;
+    picoRecarga: string | null;
+  };
+  tieneAlertas: boolean;
+  cantidadAlertas: number;
+  eventos: EventoCalendario[];
+};
+
+export type MesCalendario = {
+  mes: number;
+  anio: number;
+  nombreMes: string;
+  totalDias: number;
+  dias: DiaCalendario[];
+};
+
+export type CalendarioResultado = MesCalendario | { meses: MesCalendario[] };
+
 export type ResultadoAlertas = {
   fechaGeneracion: string;
   periodo: { inicio: string; fin: string };
@@ -60,6 +94,7 @@ export type ResultadoAlertas = {
     porTipo: Record<AlertType, number>;
     porPlaca: Record<string, { totalAlertas: number; porTipo: Partial<Record<AlertType, number>> }>;
   };
+  calendario: CalendarioResultado;
   alertas: Alerta[];
   erroresLectura: Array<{ hoja: string; fila: number; motivo: string }>;
   erroresConciliacion: ErrorConciliacion[];
@@ -479,20 +514,36 @@ function sortRecords(records: Registro[]): Registro[] {
   return [...records].sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.hora ?? "").localeCompare(b.hora ?? "") || a.fila - b.fila);
 }
 
+function compositeKey(record: Registro): string {
+  return `${record.placa}_${record.fecha}_${record.hora ?? "SIN_HORA"}_${record.numeroFactura ?? `SIN_FACTURA_${record.kilometraje ?? "SIN_KM"}_${record.valor ?? "SIN_VALOR"}`}`;
+}
+
+function recordCounts(records: Registro[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const record of records) {
+    const key = compositeKey(record);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function recordId(record: Registro, counts: Map<string, number>): string {
+  const key = compositeKey(record);
+  return (counts.get(key) ?? 0) > 1 ? `${key}_FILA_${record.fila}` : key;
+}
+
 function reconciliationError(alert: Alerta, motivo: string): ErrorConciliacion {
   return { tipo: alert.tipo, origen: alert.origen, placa: alert.placa, fecha: alert.fecha, hora: alert.hora ?? null, motivo };
 }
 
 function traceAlerts(base: Alerta[], records: Registro[], params: Parametros, people: Map<string, string>, inicio: string, fin: string, errors: ErrorConciliacion[]): Alerta[] {
   const eligible = matchingRecords(records, params, inicio, fin, fin);
-  const compositeCounts = new Map<string, number>();
-  const compositeKey = (record: Registro): string => `${record.placa}_${record.fecha}_${record.hora ?? "SIN_HORA"}_${record.numeroFactura ?? `SIN_FACTURA_${record.kilometraje ?? "SIN_KM"}_${record.valor ?? "SIN_VALOR"}`}`;
-  for (const record of records) compositeCounts.set(compositeKey(record), (compositeCounts.get(compositeKey(record)) ?? 0) + 1);
+  const compositeCounts = recordCounts(records);
   const reference = (record: Registro, alert: Alerta): RepostajeRef => {
     const key = compositeKey(record);
     if ((compositeCounts.get(key) ?? 0) > 1) errors.push(reconciliationError(alert, `Clave compuesta duplicada en Matriz; se distingue por fila ${record.fila}`));
     return {
-      idRegistro: (compositeCounts.get(key) ?? 0) > 1 ? `${key}_FILA_${record.fila}` : key,
+      idRegistro: recordId(record, compositeCounts),
       filaMatriz: record.fila, placa: record.placa, fecha: record.fecha, hora: record.hora,
       kilometraje: record.kilometraje, valorRecarga: record.valor,
       estacion: record.estacion || null, numeroFactura: record.numeroFactura,
@@ -606,6 +657,108 @@ function traceAlerts(base: Alerta[], records: Registro[], params: Parametros, pe
   return traced;
 }
 
+const MONTH_NAMES = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"];
+const WEEKDAY_NAMES = ["DOMINGO", "LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO"];
+
+function buildCalendar(rows: SheetRows, records: Registro[], alerts: Alerta[], people: Map<string, string>,
+  inicio: string, fin: string, useSheet: boolean, errors: ErrorLectura[]): CalendarioResultado {
+  const sheet = useSheet ? header(rows, "Calendario", [
+    "FECHA", "DIA_SEMANA", "REPOSTADORES", "REPOSTADORES_FUERA_DE_JORNADA",
+    "REPOSTADORES_MAS_DE_UN_REPOSTAJE", "REPOSTADORES_PICO_RECARGA", "VALIDADOR VIERNES",
+    "VALIDADOR JORNADA", "VALIDADOR MAS DE UN REPOSTAJE", "VALIDADOR_PICO_RECARGA",
+  ]) : null;
+  const sheetDays = new Map<string, SheetValue[]>();
+  if (sheet) {
+    for (let index = sheet.start; index < rows.length; index++) {
+      const row = rows[index];
+      if (!row.some(value => text(value))) continue;
+      const date = normalizeDate(cell(row, sheet.columns, "FECHA"));
+      if (!date) { errors.push({ hoja: "Calendario", fila: index + 1, motivo: "FECHA inválida" }); continue; }
+      if (date < inicio || date > fin) continue;
+      if (sheetDays.has(date)) {
+        errors.push({ hoja: "Calendario", fila: index + 1, motivo: `FECHA duplicada: ${date}` });
+        continue;
+      }
+      sheetDays.set(date, row);
+    }
+  }
+
+  const dailyAlerts = new Map<string, Alerta[]>();
+  const typesByRecord = new Map<string, Set<AlertType>>();
+  for (const alert of alerts) {
+    if (!alert.fecha || (alert.alcance !== "REPOSTAJE" && alert.alcance !== "DIA")) continue;
+    const list = dailyAlerts.get(alert.fecha) ?? [];
+    list.push(alert);
+    dailyAlerts.set(alert.fecha, list);
+    for (const ref of alert.repostajes ?? []) {
+      const types = typesByRecord.get(ref.idRegistro) ?? new Set<AlertType>();
+      types.add(alert.tipo);
+      typesByRecord.set(ref.idRegistro, types);
+    }
+  }
+
+  const recordsByDay = new Map<string, Registro[]>();
+  for (const record of sortRecords(records)) {
+    if (record.fecha < inicio || record.fecha > fin) continue;
+    const list = recordsByDay.get(record.fecha) ?? [];
+    list.push(record);
+    recordsByDay.set(record.fecha, list);
+  }
+  const counts = recordCounts(records);
+  const alertPlates = (dayAlerts: Alerta[], type: AlertType): string[] =>
+    [...new Set(dayAlerts.filter(alert => alert.tipo === type).map(alert => alert.placa).filter((plate): plate is string => Boolean(plate)))];
+  const sheetPlates = (row: SheetValue[] | undefined, field: string): string[] =>
+    row && sheet ? plates(cell(row, sheet.columns, field)) : [];
+  const sheetStatus = (row: SheetValue[] | undefined, field: string): string | null => {
+    if (!row || !sheet) return null;
+    const value = cell(row, sheet.columns, field);
+    return value === undefined || value === null || value === "" ? null : String(value);
+  };
+
+  const months: MesCalendario[] = [];
+  const [startYear, startMonth] = inicio.slice(0, 7).split("-").map(Number);
+  const [endYear, endMonth] = fin.slice(0, 7).split("-").map(Number);
+  for (let year = startYear, month = startMonth; year < endYear || (year === endYear && month <= endMonth);) {
+    const totalDias = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const dias: DiaCalendario[] = [];
+    for (let number = 1; number <= totalDias; number++) {
+      const fecha = `${year}-${String(month).padStart(2, "0")}-${String(number).padStart(2, "0")}`;
+      const dayAlerts = dailyAlerts.get(fecha) ?? [];
+      const dayRecords = recordsByDay.get(fecha) ?? [];
+      const row = sheetDays.get(fecha);
+      const validator = (type: AlertType): string => dayAlerts.some(alert => alert.tipo === type) ? "SALVEDAD" : "OK";
+      const eventos: EventoCalendario[] = dayRecords.map(record => {
+        const idRegistro = recordId(record, counts);
+        return {
+          idRegistro, placa: record.placa, empleado: people.get(record.placa) ?? null,
+          fecha: record.fecha, hora: record.hora, kilometraje: record.kilometraje,
+          valorRecarga: record.valor, estacion: record.estacion || null,
+          numeroFactura: record.numeroFactura, tiposAlerta: [...(typesByRecord.get(idRegistro) ?? [])],
+        };
+      });
+      const cantidadAlertas = new Set(dayAlerts.map(alert => alert.id)).size;
+      dias.push({
+        fecha, numeroDia: number, diaSemana: WEEKDAY_NAMES[new Date(Date.UTC(year, month - 1, number)).getUTCDay()],
+        repostadores: sheet ? sheetPlates(row, "REPOSTADORES") : [...new Set(dayRecords.map(record => record.placa))],
+        repostadoresFueraDeJornada: sheet ? sheetPlates(row, "REPOSTADORES_FUERA_DE_JORNADA") : alertPlates(dayAlerts, "FUERA_DE_JORNADA"),
+        repostadoresMasDeUnRepostaje: sheet ? sheetPlates(row, "REPOSTADORES_MAS_DE_UN_REPOSTAJE") : alertPlates(dayAlerts, "MULTIPLES_REPOSTAJES"),
+        repostadoresPicoRecarga: sheet ? sheetPlates(row, "REPOSTADORES_PICO_RECARGA") : alertPlates(dayAlerts, "PICO_RECARGA"),
+        validadores: sheet ? {
+          viernes: sheetStatus(row, "VALIDADOR VIERNES"), jornada: sheetStatus(row, "VALIDADOR JORNADA"),
+          masDeUnRepostaje: sheetStatus(row, "VALIDADOR MAS DE UN REPOSTAJE"), picoRecarga: sheetStatus(row, "VALIDADOR_PICO_RECARGA"),
+        } : {
+          viernes: validator("REPOSTAJE_VIERNES"), jornada: validator("FUERA_DE_JORNADA"),
+          masDeUnRepostaje: validator("MULTIPLES_REPOSTAJES"), picoRecarga: validator("PICO_RECARGA"),
+        },
+        tieneAlertas: cantidadAlertas > 0, cantidadAlertas, eventos,
+      });
+    }
+    months.push({ mes: month, anio: year, nombreMes: MONTH_NAMES[month], totalDias, dias });
+    if (month === 12) { year++; month = 1; } else month++;
+  }
+  return months.length === 1 ? months[0] : { meses: months };
+}
+
 export function consolidarAlertas(data: AlertasData, options: { fechaInicio?: string; fechaFin?: string } = {}, now = new Date()): ResultadoAlertas {
   const params = parameters(data.parametros);
   const inicio = options.fechaInicio === undefined ? params.inicio : normalizeDate(options.fechaInicio);
@@ -649,6 +802,7 @@ export function consolidarAlertas(data: AlertasData, options: { fechaInicio?: st
       porPlaca[alert.placa] = summary;
     }
   }
+  const calendario = buildCalendar(data.calendario, records, alerts, people, inicio, fin, !recalculate, errors);
   return {
     fechaGeneracion: localNow.timestamp,
     periodo: { inicio, fin },
@@ -660,6 +814,7 @@ export function consolidarAlertas(data: AlertasData, options: { fechaInicio?: st
       porTipo,
       porPlaca,
     },
+    calendario,
     alertas: alerts,
     erroresLectura: errors,
     erroresConciliacion: [...new Map(erroresConciliacion.map(error => [JSON.stringify(error), error])).values()],

@@ -6,6 +6,8 @@ Este bot usa Baileys, Node.js y TypeScript. Recibe dos fotos por WhatsApp en cua
 
 `AlertasService` consulta Google Sheets en modo de solo lectura y entrega un JSON con el resumen, las alertas, los repostajes originales de `Matriz` y los errores de conciliación. Reutiliza `GOOGLE_SPREADSHEET_ID` y `GOOGLE_APPLICATION_CREDENTIALS` del `.env`; la cuenta de servicio necesita acceso de lectura a la hoja.
 
+El JSON incluye `calendario` después de `resumen`. Para un mes contiene `mes`, `anio`, `nombreMes`, `totalDias` y todos los `dias`, incluidos los días sin repostajes. Cada día conserva los campos y validadores de `Calendario` cuando el período coincide con `PARAMETROS`, y añade los eventos de `Matriz` con sus tipos de alerta. Para otro período, los campos diarios se reconstruyen desde `Matriz` y las alertas calculadas; si abarca varios meses, se devuelven en `calendario.meses[]`.
+
 Desde la raíz del repositorio:
 
 ```bash

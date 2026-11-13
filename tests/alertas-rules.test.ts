@@ -51,7 +51,9 @@ test("normaliza fechas seriales, fechas formateadas y horas fraccionarias", () =
 });
 
 test("consolida validadores de hojas sin duplicar placas ni el pico del Calendario", () => {
-  const result = consolidarAlertas(fixture(), {}, now);
+  const data = fixture();
+  data.calendario[9][6] = " SALVEDAD ";
+  const result = consolidarAlertas(data, {}, now);
   assert.equal(result.resumen.totalAlertas, 7);
   assert.equal(result.resumen.totalVehiculosConAlertas, 1);
   assert.equal(result.resumen.totalDiasConAlertas, 1);
@@ -68,6 +70,11 @@ test("consolida validadores de hojas sin duplicar placas ni el pico del Calendar
   assert.equal(result.resumen.porPlaca["GBA-1234"].totalAlertas, 6);
   assert.equal(result.alertas.find(alert => alert.tipo === "PRESUPUESTO_EXCEDIDO")?.alcance, "GLOBAL");
   assert.equal(result.alertas.find(alert => alert.tipo === "KILOMETRAJE_EN_LIMITE")?.repostajes?.length, 2);
+  const calendar = result.calendario;
+  if (!("dias" in calendar)) throw new Error("Se esperaba un único mes");
+  const friday = calendar.dias.find(day => day.fecha === "2026-11-06");
+  assert.deepEqual(friday?.repostadores, ["GBA-1234"]);
+  assert.equal(friday?.validadores.viernes, " SALVEDAD ");
 });
 
 test("recalcula un período personalizado con cinco recargas anteriores fuera del período", () => {
@@ -147,6 +154,64 @@ test("concilia diez repostajes de noviembre con nueve alertas y referencias exac
   assert.equal(budget?.detalles.gastoTotal, 426.6);
   assert.equal(budget?.detalles.excesoDolares, 26.6);
   assert.equal(budget?.repostajes?.length, 10);
+
+  assert.deepEqual(Object.keys(result).slice(0, 4), ["fechaGeneracion", "periodo", "resumen", "calendario"]);
+  const calendar = result.calendario;
+  if (!("dias" in calendar)) throw new Error("Se esperaba un único mes");
+  assert.equal(calendar.mes, 11);
+  assert.equal(calendar.anio, 2026);
+  assert.equal(calendar.nombreMes, "NOVIEMBRE");
+  assert.equal(calendar.totalDias, 30);
+  assert.equal(calendar.dias.length, 30);
+  assert.equal(calendar.dias.reduce((sum, day) => sum + day.cantidadAlertas, 0), 7);
+  const day = (date: string) => calendar.dias.find(item => item.fecha === date);
+  assert.equal(day("2026-11-06")?.cantidadAlertas, 1);
+  assert.equal(day("2026-11-09")?.cantidadAlertas, 1);
+  assert.equal(day("2026-11-13")?.cantidadAlertas, 2);
+  assert.equal(day("2026-11-16")?.cantidadAlertas, 1);
+  assert.equal(day("2026-11-20")?.cantidadAlertas, 2);
+  assert.deepEqual(day("2026-11-13")?.eventos[0].tiposAlerta, ["REPOSTAJE_VIERNES", "PICO_RECARGA"]);
+  assert.equal(day("2026-11-13")?.eventos[0].numeroFactura, "TEST-001-000006");
+  assert.deepEqual(day("2026-11-13")?.repostadoresPicoRecarga, ["TEST-001"]);
+  assert.equal(day("2026-11-13")?.validadores.picoRecarga, "SALVEDAD");
+  assert.deepEqual(day("2026-11-16")?.eventos.map(event => event.hora), ["08:00", "15:00"]);
+  assert.ok(day("2026-11-16")?.eventos.every(event => event.tiposAlerta.includes("MULTIPLES_REPOSTAJES")));
+  assert.deepEqual(day("2026-11-20")?.eventos[0].tiposAlerta, ["REPOSTAJE_VIERNES", "FUERA_DE_JORNADA"]);
+  assert.equal(day("2026-11-01")?.diaSemana, "DOMINGO");
+  assert.equal(day("2026-11-01")?.cantidadAlertas, 0);
+  assert.equal(day("2026-11-01")?.tieneAlertas, false);
+  assert.deepEqual(day("2026-11-01")?.eventos, []);
+  assert.equal(day("2026-11-30")?.numeroDia, 30);
+});
+
+test("reconstruye calendario personalizado sin reutilizar validadores de Sheets", () => {
+  const data = fixture(25);
+  data.calendario[9][6] = "OK";
+  const result = consolidarAlertas(data, { fechaInicio: "2026-11-02", fechaFin: "2026-11-06" }, now);
+  const calendar = result.calendario;
+  if (!("dias" in calendar)) throw new Error("Se esperaba un único mes");
+  assert.equal(calendar.totalDias, 30);
+  const friday = calendar.dias.find(day => day.fecha === "2026-11-06");
+  assert.equal(friday?.validadores.viernes, "SALVEDAD");
+  assert.deepEqual(friday?.repostadores, ["GBA-1234"]);
+  assert.deepEqual(friday?.repostadoresFueraDeJornada, ["GBA-1234"]);
+  assert.equal(friday?.cantidadAlertas, 5);
+  assert.deepEqual(calendar.dias.find(day => day.fecha === "2026-11-01")?.eventos, []);
+});
+
+test("agrupa varios meses y cubre febrero bisiesto y meses de 28, 30 y 31 días", () => {
+  const data = fixture();
+  const multi = consolidarAlertas(data, { fechaInicio: "2024-02-28", fechaFin: "2024-03-02" }, now).calendario;
+  if (!("meses" in multi)) throw new Error("Se esperaban varios meses");
+  assert.deepEqual(multi.meses.map(month => month.totalDias), [29, 31]);
+  assert.equal(multi.meses[0].dias[28].fecha, "2024-02-29");
+  assert.equal(multi.meses[1].dias[0].fecha, "2024-03-01");
+  const february = consolidarAlertas(data, { fechaInicio: "2025-02-01", fechaFin: "2025-02-28" }, now).calendario;
+  if (!("dias" in february)) throw new Error("Se esperaba un único mes");
+  assert.equal(february.totalDias, 28);
+  const april = consolidarAlertas(data, { fechaInicio: "2026-04-01", fechaFin: "2026-04-30" }, now).calendario;
+  if (!("dias" in april)) throw new Error("Se esperaba un único mes");
+  assert.equal(april.totalDias, 30);
 });
 
 test("reporta un pico ambiguo sin elegir una factura por el orden de las filas", () => {

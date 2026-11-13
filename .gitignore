@@ -11,3 +11,4 @@ keys/
 keys
 keys/*
 google-drive-token*.json
+drive_backups/

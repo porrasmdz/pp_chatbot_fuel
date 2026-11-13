@@ -10,5 +10,6 @@ rate_limits.json
 rate_limits.json.tmp
 google-service-account.json
 keys
+drive_backups
 *.pem
 *.key

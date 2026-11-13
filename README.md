@@ -170,7 +170,26 @@ El script mantiene `drive.file`, busca una raíz existente marcada por la aplica
 
 Si la pantalla de consentimiento de una aplicación **Externa** permanece en **Testing**, [Google puede caducar el refresh token de Drive a los siete días](https://developers.google.com/identity/protocols/oauth2). Para uso continuo, revisa Google Auth Platform > Audience y el estado de publicación de la aplicación; podría requerir verificación según los permisos y usuarios.
 
-En la VPS, copia el `.env` y la carpeta `keys/` como se explica en el despliegue. `compose.yaml` ya monta `./keys` en `/app/keys` como solo lectura. La futura integración deberá leer el refresh token y renovarse los access tokens **en memoria** mediante `OAuth2Client`, sin escribir en ese montaje. Si alguna vez necesitas persistir un refresh token nuevo, autoriza otra vez en tu PC y vuelve a copiar el archivo, o usa un volumen privado escribible con permisos restrictivos y escritura atómica. El callback `localhost` y el navegador solo se usan durante esta autorización local.
+En la VPS, copia el `.env` y la carpeta `keys/` como se explica en el despliegue. `compose.yaml` ya monta `./keys` en `/app/keys` como solo lectura. La integración lee el refresh token y renueva los access tokens **en memoria** mediante `OAuth2Client`, sin escribir en ese montaje. Si alguna vez necesitas persistir un refresh token nuevo, autoriza otra vez en tu PC y vuelve a copiar el archivo, o usa un volumen privado escribible con permisos restrictivos y escritura atómica. El callback `localhost` y el navegador solo se usan durante esta autorización local.
+
+## Respaldo automático de fotografías en Drive
+
+Después de registrar un repostaje en Matriz, el bot respalda la factura y la foto del kilometraje en la carpeta `PLACA_EMPLEADO` dentro de `GOOGLE_DRIVE_ROOT_FOLDER_ID`. Obtiene la identidad únicamente de `Personas`, relacionando teléfono y placa; si falta esa relación, conserva las fotos como pendientes. Los nombres usan la fecha y hora del registro en `America/Guayaquil`, y Drive guarda un identificador privado del repostaje en cada archivo para evitar duplicados y completar respaldos parciales.
+
+Las dos fotos se guardan antes de escribir en Sheets en `APP_DATA_DIR/drive_backups/pending`. En Docker, `APP_DATA_DIR=/data` ya usa el volumen `chatbot_data`, por lo que sobreviven reinicios. Al confirmar ambos archivos en Drive, se borran las imágenes locales y queda solo un recibo pequeño para reconocer el repostaje si Baileys repite el evento. Los errores temporales se reintentan; errores permanentes quedan bloqueados. Tras corregir credenciales o permisos, reactívalos en la VPS con:
+
+```bash
+docker compose run --rm chatbot node scripts/reintentar-respaldos.js
+```
+
+El registro de Matriz permanece aunque Drive falle. Si cambias la relación de un usuario en `Personas`, el bot volverá a intentar los trabajos pendientes. El token OAuth y el JSON del cliente siguen montados en `./keys` como solo lectura; los access tokens se renuevan en memoria. Las fotos en Drive son privadas y no se cambian sus permisos.
+
+Hay una prueba de integración **opcional** que sube dos imágenes ficticias a `TEST001_USUARIO PRUEBA` y comprueba que repetir el mismo `idRegistro` no duplica archivos. No se ejecuta en `npm test`; úsala solo si deseas crear esos archivos de prueba:
+
+```bash
+npm run build
+node scripts/probar-drive-backup.js --real-upload
+```
 
 ## Aclaración de campos por mensaje
 

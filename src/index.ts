@@ -11,7 +11,9 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import { analyzeImage, type DashboardReading } from "./analyze.js";
+import { BackupRuntime } from "./backup-runtime.js";
 import { applyClarification, fieldsToClarify } from "./clarification.js";
+import { registrationSignature, stableRecordId } from "./drive-backup-queue.js";
 import { analyzeInvoice, camposFacturaFaltantes, facturaLegible, type InvoiceReading } from "./invoice.js";
 import { RateLimiter } from "./rate-limit.js";
 import { appendPhotoWarning, appendReading, photoWarningRow, readingRow, sheetConfigFromEnv } from "./sheets.js";
@@ -26,6 +28,7 @@ const seen = new Set<string>();
 
 type IncomingImage = { id: string; mime: string; numeroUsuario: string | null; remitenteJid: string };
 type QueuedPhoto = { message: WAMessage; image: IncomingImage; receivedAt: number };
+type SessionPhoto = { image: IncomingImage; receivedAt: number; bytes: Buffer };
 type PendingSession = {
   deadline: number;
   timer: ReturnType<typeof setTimeout>;
@@ -34,8 +37,8 @@ type PendingSession = {
   phone: string | null;
   reading?: DashboardReading;
   invoice?: InvoiceReading;
-  dashboardPhoto?: { image: IncomingImage; receivedAt: number };
-  invoicePhoto?: { image: IncomingImage; receivedAt: number };
+  dashboardPhoto?: SessionPhoto;
+  invoicePhoto?: SessionPhoto;
   awaitingClarification?: { fields: string[]; deadline: number };
   dashboardMessageId?: string;
   invoiceMessageId?: string;
@@ -66,7 +69,9 @@ export function whatsappSentAt(message: WAMessage): Date | null {
 function incomingSender(message: WAMessage): Omit<IncomingImage, "mime"> | null {
   const jid = message.key.remoteJid;
   if (message.key.fromMe || !jid || !(jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid")) || !message.key.id) return null;
-  const numeroUsuario = jid.endsWith("@s.whatsapp.net") ? jidDecode(jid)?.user || null : null;
+  const alternate = (message.key as typeof message.key & { remoteJidAlt?: string }).remoteJidAlt;
+  const phoneJid = jid.endsWith("@s.whatsapp.net") ? jid : alternate?.endsWith("@s.whatsapp.net") ? alternate : null;
+  const numeroUsuario = phoneJid ? jidDecode(phoneJid)?.user || null : null;
   return { id: message.key.id, numeroUsuario, remitenteJid: jid };
 }
 
@@ -75,6 +80,8 @@ async function startWhatsApp(): Promise<void> {
     throw new Error("Configura OPENROUTER_API_KEY y OPENROUTER_MODEL en .env");
   }
   const sheetConfig = sheetConfigFromEnv();
+  const backupRuntime = sheetConfig ? new BackupRuntime(sheetConfig, process.env.APP_DATA_DIR || ".") : null;
+  if (backupRuntime) await backupRuntime.start();
   const rateLimiter = new RateLimiter();
   const sessions = new Map<string, PendingSession>();
   const queues = new Map<string, Promise<void>>();
@@ -115,8 +122,34 @@ async function startWhatsApp(): Promise<void> {
     };
     const row = readingRow(input);
     if (sheetConfig) {
+      let backupId: string | null = null;
+      if (backupRuntime && session.dashboardPhoto && session.invoicePhoto && session.dashboardMessageId && session.invoiceMessageId && session.invoice.placa) {
+        backupId = stableRecordId(jid, session.dashboardMessageId, session.invoiceMessageId, session.invoice.placa, String(row[3]), String(row[4]));
+        let stage: "COMPLETE" | "EXISTING" | "STAGED" | null = null;
+        try {
+          stage = await backupRuntime.stage({
+            idRegistro: backupId, phone: session.phone, jid, claimedPlate: session.invoice.placa,
+            fecha: String(row[3]), hora: String(row[4]), signature: registrationSignature(row),
+            factura: { buffer: session.invoicePhoto.bytes, mimeType: session.invoicePhoto.image.mime },
+            kilometraje: { buffer: session.dashboardPhoto.bytes, mimeType: session.dashboardPhoto.image.mime },
+          });
+        } catch (error) {
+          console.error("No se pudo persistir el respaldo de fotos:", error instanceof Error ? error.message : "error desconocido");
+          backupId = null;
+        }
+        if (backupId && (stage === "COMPLETE" || await backupRuntime.alreadyRegistered(backupId))) {
+          console.log(`Registro ${backupId} ya procesado; se evita repetir la fila de Matriz.`);
+          closeSession(jid, session);
+          await activeSocket.sendMessage(jid, { text: mensajeRegistroExitoso });
+          return;
+        }
+      }
       const range = await appendReading(sheetConfig, input);
       console.log(`Lectura y factura guardadas en Google Sheets (${range})`);
+      if (backupId && backupRuntime) {
+        try { await backupRuntime.markRegistered(backupId, range); }
+        catch (error) { console.error("Matriz se guardó, pero el respaldo quedó pendiente de conciliación:", error instanceof Error ? error.message : "error desconocido"); }
+      }
     } else {
       console.log(JSON.stringify({
         telf: row[0],
@@ -242,7 +275,7 @@ async function startWhatsApp(): Promise<void> {
           const issues = invoiceIssues(invoice);
           if (!facturaLegible(invoice)) invoiceErrors.push(...(issues.length ? issues : ["No se pudieron validar todos los campos de la factura"]));
           session.invoice = invoice;
-          session.invoicePhoto = { image, receivedAt };
+          session.invoicePhoto = { image, receivedAt, bytes };
           session.invoiceMessageId = image.id;
           session.lastValidSentAt = sentAt;
           session.phone ??= image.numeroUsuario;
@@ -270,7 +303,7 @@ async function startWhatsApp(): Promise<void> {
         const issues = dashboardIssues(reading);
         if (!lecturaConfiable(reading)) dashboardErrors.push(...(issues.length ? issues : ["No se pudieron validar todos los datos del tablero"]));
         session.reading = reading;
-        session.dashboardPhoto = { image, receivedAt };
+        session.dashboardPhoto = { image, receivedAt, bytes };
         session.dashboardMessageId = image.id;
         session.lastValidSentAt = sentAt;
         session.phone ??= image.numeroUsuario;

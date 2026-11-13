@@ -9,7 +9,8 @@ RUN npm run build
 
 FROM node:22-bookworm-slim
 
-ENV NODE_ENV=production
+ENV NODE_ENV=production APP_DATA_DIR=/data
+LABEL org.opencontainers.image.source="https://github.com/porrasmdz/pp_chatbot_fuel"
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force

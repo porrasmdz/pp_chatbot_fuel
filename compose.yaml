@@ -1,0 +1,13 @@
+services:
+  chatbot:
+    image: ghcr.io/porrasmdz/pp_chatbot_fuel:latest
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    volumes:
+      - chatbot_data:/data
+      - ./keys:/app/keys:ro
+
+volumes:
+  chatbot_data:

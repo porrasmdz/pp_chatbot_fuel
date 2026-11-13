@@ -1,9 +1,10 @@
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const WINDOW_MS = 60_000;
 const MAX_MESSAGES = 50;
 const BLOCK_MS = 8 * 60 * 60 * 1000;
-const FILE_PATH = "rate_limits.json";
+const FILE_PATH = join(process.env.APP_DATA_DIR || ".", "rate_limits.json");
 
 type SenderState = { timestamps: number[]; blockedUntil: number };
 export type RateResult = "allowed" | "just_blocked" | "blocked";
@@ -12,6 +13,7 @@ export class RateLimiter {
   private states = new Map<string, SenderState>();
 
   constructor() {
+    mkdirSync(dirname(FILE_PATH), { recursive: true });
     try {
       const saved = JSON.parse(readFileSync(FILE_PATH, "utf8")) as Record<string, SenderState>;
       for (const [jid, state] of Object.entries(saved)) {

@@ -19,7 +19,59 @@ docker push ghcr.io/porrasmdz/pp_chatbot_fuel:latest
 Remove-Item Env:GHCR_TOKEN
 ```
 
-Para iniciar el bot en Docker, pasa la configuración mediante `--env-file`. Monta un directorio persistente para `auth_info_baileys/` y el archivo JSON de credenciales de Google si usas Sheets. El Dockerfile no incorpora `.env`, claves ni sesiones de WhatsApp a la imagen.
+## Despliegue en VPS con Docker Compose
+
+La VPS necesita Docker con el plugin Compose, el archivo `.env` y, si usas Google Sheets, el JSON de la cuenta de servicio. Estos archivos no vienen en el repositorio ni en la imagen. El `compose.yaml` monta `./keys` de la VPS en `/app/keys` como solo lectura y crea el volumen `chatbot_data` para la sesión de WhatsApp y `rate_limits.json`.
+
+**Primera instalación.** En la VPS (Linux):
+
+```bash
+git clone https://github.com/porrasmdz/pp_chatbot_fuel.git ~/pp_chatbot_fuel
+cd ~/pp_chatbot_fuel
+mkdir -p keys
+```
+
+Desde tu PC, ubicado en la carpeta local de este proyecto, copia los archivos privados por SSH. Sustituye `usuario@IP_DE_TU_VPS` por tu usuario y dirección reales:
+
+```powershell
+scp .env usuario@IP_DE_TU_VPS:~/pp_chatbot_fuel/.env
+scp keys/gcloud-keys.json usuario@IP_DE_TU_VPS:~/pp_chatbot_fuel/keys/gcloud-keys.json
+```
+
+Si todavía no tienes `.env`, créalo a partir de `.env.example` y completa `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` y las tres variables de Google Sheets. En la VPS, `GOOGLE_APPLICATION_CREDENTIALS` debe valer `./keys/gcloud-keys.json`. Si no usas Sheets, deja vacías las tres variables `GOOGLE_*` y omite la segunda copia `scp`.
+
+Vuelve a la VPS y protege los archivos copiados:
+
+```bash
+cd ~/pp_chatbot_fuel
+chmod 600 .env
+if [ -f keys/gcloud-keys.json ]; then chmod 600 keys/gcloud-keys.json; fi
+```
+
+Si la imagen de GHCR es privada, inicia sesión en la VPS con un token classic que tenga `read:packages`:
+
+```bash
+read -rsp 'Token GHCR: ' GHCR_TOKEN; echo
+echo "$GHCR_TOKEN" | docker login ghcr.io -u porrasmdz --password-stdin
+unset GHCR_TOKEN
+```
+
+Arranca el bot desde la VPS. No hace falta construir la imagen allí; Compose la descarga de GHCR:
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose logs -f chatbot
+```
+
+El QR para vincular WhatsApp aparece en los logs la primera vez. No hace falta publicar ningún puerto: el bot inicia conexiones salientes. Para actualizaciones posteriores, primero publica la nueva imagen en GHCR y después ejecuta en la VPS:
+
+```bash
+cd ~/pp_chatbot_fuel
+git pull
+docker compose pull
+docker compose up -d
+```
 
 ## Preparación
 

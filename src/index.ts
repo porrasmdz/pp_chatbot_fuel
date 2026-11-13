@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { extname } from "node:path";
+import { extname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import makeWASocket, {
   DisconnectReason,
@@ -17,7 +17,7 @@ import { appendPhotoWarning, appendReading, photoWarningRow, readingRow, sheetCo
 import { contenidoInvalido, lecturaConfiable, limiteAlcanzado, mensajeRegistroExitoso, pedirFactura, pedirKilometraje, primeraFotoRecibida, sesionExpirada } from "./templates.js";
 import { dashboardIssues, invoiceIssues, validationMessage } from "./validation.js";
 
-const SESSION_DIR = "auth_info_baileys";
+const SESSION_DIR = join(process.env.APP_DATA_DIR || ".", "auth_info_baileys");
 const SESSION_WINDOW_MS = 5 * 60_000;
 const PHOTO_BATCH_MS = 5_000;
 const seen = new Set<string>();
